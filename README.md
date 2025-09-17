@@ -3,7 +3,7 @@
 
 Projeto de controle retrô para fliperamas e consoles clássicos. Estrutura impressa em 3D, acabamento liso e base antiderrapante. Equipado com **1 joystick** de alta precisão e **2 botões arcade mecânicos**, conectados via USB plug-and-play. Inclui código em C++ para integração com sistemas e emuladores retrô.
 
-![Controle Retrô](control2.jpg)
+![Controle Retrô](images/control2.jpg)
 
 
 ## Materiais / Estrutura
