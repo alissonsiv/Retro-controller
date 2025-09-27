@@ -4,32 +4,54 @@
 // ------------------- CONFIGURAÇÃO DE PINOS -------------------
 const int JOYSTICK_X = 34;
 const int JOYSTICK_Y = 35;
-const int BUTTON_1 = 12;   
-const int BUTTON_2 = 13;  
-
-// ------------------- VARIÁVEIS -------------------
-int lastButton1State = LOW;
-int lastButton2State = LOW;
+const int BUTTON_1   = 12;
+const int BUTTON_2   = 13;
 
 // ------------------- HID -------------------
 Adafruit_USBD_HID usb_hid;
+uint8_t report[3]; // 1 byte X, 1 byte Y, 1 byte botões (8 bits)
 
-uint8_t report[3]; // 1 byte para X, 1 byte para Y, 1 byte para botões (8 bits)
+// ------------------- DEBOUNCE SEM DELAY -------------------
+struct Button {
+  int pin;
+  bool state;
+  bool lastReading;
+  unsigned long lastDebounceTime;
+  unsigned long debounceDelay;
+};
 
-// ------------------- FUNÇÕES -------------------
-int mapJoystick(int value) {
-  // ESP32 ADC é 0-4095, mapeia para -127 a 127
-  return map(value, 0, 4095, -127, 127);
+// Inicializa os botões
+Button button1 = {BUTTON_1, LOW, LOW, 0, 10};
+Button button2 = {BUTTON_2, LOW, LOW, 0, 10};
+
+// Função de leitura de botão com debounce sem delay
+bool readButton(Button &btn) {
+  bool reading = !digitalRead(btn.pin); // INPUT_PULLUP ativo
+  if (reading != btn.lastReading) {
+    btn.lastDebounceTime = millis();
+  }
+  btn.lastReading = reading;
+
+  if ((millis() - btn.lastDebounceTime) > btn.debounceDelay) {
+    if (reading != btn.state) {
+      btn.state = reading;
+    }
+  }
+  return btn.state;
 }
 
-bool debounceButton(int pin, int &lastState) {
-  int reading = !digitalRead(pin); // Inverte pois INPUT_PULLUP
-  if (reading != lastState) {
-    delay(10); // debounce
-    reading = !digitalRead(pin);
-  }
-  lastState = reading;
-  return reading;
+// Retorna os estados dos botões em um byte
+uint8_t getButtonByte() {
+  uint8_t buttons = 0;
+  if (readButton(button1)) buttons |= 0x01; // Botão 1
+  if (readButton(button2)) buttons |= 0x02; // Botão 2
+  return buttons;
+}
+
+// ------------------- JOYSTICK -------------------
+int mapJoystick(int value) {
+  // ESP32 ADC 0-4095 → -127 a 127
+  return map(value, 0, 4095, -127, 127);
 }
 
 // ------------------- SETUP -------------------
@@ -41,7 +63,7 @@ void setup() {
   pinMode(BUTTON_1, INPUT_PULLUP);
   pinMode(BUTTON_2, INPUT_PULLUP);
 
-  // Inicializa USB HID como joystick com 2 eixos e 8 botões
+  // Inicializa USB HID como joystick (2 eixos, 8 botões)
   usb_hid.setPollInterval(2);
   usb_hid.setReportDescriptor({
     0x05, 0x01,        // USAGE_PAGE (Generic Desktop)
@@ -67,7 +89,7 @@ void setup() {
     0x81, 0x02,        //   INPUT (Data,Var,Abs)
     0xc0               // END_COLLECTION
   }, sizeof(report));
-  
+
   usb_hid.begin();
   delay(1000); // tempo para inicializar USB
 }
@@ -75,24 +97,18 @@ void setup() {
 // ------------------- LOOP -------------------
 void loop() {
   // Leitura dos botões
-  bool btn1 = debounceButton(BUTTON_1, lastButton1State);
-  bool btn2 = debounceButton(BUTTON_2, lastButton2State);
-
-  // Monta o byte de botões (apenas dois botões usados)
-  uint8_t buttonByte = 0;
-  if (btn1) buttonByte |= 0x01;
-  if (btn2) buttonByte |= 0x02;
+  uint8_t buttonByte = getButtonByte();
 
   // Leitura do joystick
   int x = mapJoystick(analogRead(JOYSTICK_X));
   int y = mapJoystick(analogRead(JOYSTICK_Y));
 
-  // Atualiza o relatório HID
+  // Atualiza relatório HID
   report[0] = x;
   report[1] = y;
   report[2] = buttonByte;
 
   usb_hid.sendReport(0, report, sizeof(report));
-
-  delay(5);
+  
+  delay(5); // mantém taxa de atualização estável
 }
