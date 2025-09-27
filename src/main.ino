@@ -1,37 +1,98 @@
-#include "joystick.h"
-#include <HID-Project.h>
-#include <HID-Settings.h>
+#include <Arduino.h>
+#include "Adafruit_TinyUSB.h"
 
-// Configuração de botões
-const int buttonPin1 = 12;
-const int buttonPin2 = 13;
+// ------------------- CONFIGURAÇÃO DE PINOS -------------------
+const int JOYSTICK_X = 34;
+const int JOYSTICK_Y = 35;
+const int BUTTON_1 = 12;   
+const int BUTTON_2 = 13;  
 
+// ------------------- VARIÁVEIS -------------------
 int lastButton1State = LOW;
 int lastButton2State = LOW;
 
+// ------------------- HID -------------------
+Adafruit_USBD_HID usb_hid;
+
+uint8_t report[3]; // 1 byte para X, 1 byte para Y, 1 byte para botões (8 bits)
+
+// ------------------- FUNÇÕES -------------------
+int mapJoystick(int value) {
+  // ESP32 ADC é 0-4095, mapeia para -127 a 127
+  return map(value, 0, 4095, -127, 127);
+}
+
+bool debounceButton(int pin, int &lastState) {
+  int reading = !digitalRead(pin); // Inverte pois INPUT_PULLUP
+  if (reading != lastState) {
+    delay(10); // debounce
+    reading = !digitalRead(pin);
+  }
+  lastState = reading;
+  return reading;
+}
+
+// ------------------- SETUP -------------------
 void setup() {
-  pinMode(buttonPin1, INPUT_PULLUP);
-  pinMode(buttonPin2, INPUT_PULLUP);
+  Serial.begin(115200);
 
   pinMode(JOYSTICK_X, INPUT);
   pinMode(JOYSTICK_Y, INPUT);
+  pinMode(BUTTON_1, INPUT_PULLUP);
+  pinMode(BUTTON_2, INPUT_PULLUP);
 
-  Gamepad.begin();
+  // Inicializa USB HID como joystick com 2 eixos e 8 botões
+  usb_hid.setPollInterval(2);
+  usb_hid.setReportDescriptor({
+    0x05, 0x01,        // USAGE_PAGE (Generic Desktop)
+    0x09, 0x04,        // USAGE (Joystick)
+    0xa1, 0x01,        // COLLECTION (Application)
+    0x09, 0x01,        //   USAGE (Pointer)
+    0xa1, 0x00,        //   COLLECTION (Physical)
+    0x09, 0x30,        //     USAGE (X)
+    0x09, 0x31,        //     USAGE (Y)
+    0x15, 0x81,        //     LOGICAL_MINIMUM (-127)
+    0x25, 0x7F,        //     LOGICAL_MAXIMUM (127)
+    0x75, 0x08,        //     REPORT_SIZE (8)
+    0x95, 0x02,        //     REPORT_COUNT (2)
+    0x81, 0x02,        //     INPUT (Data,Var,Abs)
+    0xc0,              //   END_COLLECTION
+    0x05, 0x09,        //   USAGE_PAGE (Button)
+    0x19, 0x01,        //   USAGE_MINIMUM (Button 1)
+    0x29, 0x08,        //   USAGE_MAXIMUM (Button 8)
+    0x15, 0x00,        //   LOGICAL_MINIMUM (0)
+    0x25, 0x01,        //   LOGICAL_MAXIMUM (1)
+    0x75, 0x01,        //   REPORT_SIZE (1)
+    0x95, 0x08,        //   REPORT_COUNT (8)
+    0x81, 0x02,        //   INPUT (Data,Var,Abs)
+    0xc0               // END_COLLECTION
+  }, sizeof(report));
+  
+  usb_hid.begin();
+  delay(1000); // tempo para inicializar USB
 }
 
+// ------------------- LOOP -------------------
 void loop() {
-  bool btn1 = debounceButton(buttonPin1, lastButton1State);
-  bool btn2 = debounceButton(buttonPin2, lastButton2State);
+  // Leitura dos botões
+  bool btn1 = debounceButton(BUTTON_1, lastButton1State);
+  bool btn2 = debounceButton(BUTTON_2, lastButton2State);
 
-  Gamepad.setButton(0, btn1);
-  Gamepad.setButton(1, btn2);
+  // Monta o byte de botões (apenas dois botões usados)
+  uint8_t buttonByte = 0;
+  if (btn1) buttonByte |= 0x01;
+  if (btn2) buttonByte |= 0x02;
 
+  // Leitura do joystick
   int x = mapJoystick(analogRead(JOYSTICK_X));
   int y = mapJoystick(analogRead(JOYSTICK_Y));
 
-  Gamepad.setX(x);
-  Gamepad.setY(y);
+  // Atualiza o relatório HID
+  report[0] = x;
+  report[1] = y;
+  report[2] = buttonByte;
 
-  Gamepad.sendReport();
+  usb_hid.sendReport(0, report, sizeof(report));
+
   delay(5);
 }
